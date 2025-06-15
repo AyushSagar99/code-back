@@ -1,0 +1,55 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Problem {
+  id          String   @id @default(cuid())
+  title       String
+  description String
+  difficulty  String
+  timeLimit   Int      @default(2000) // milliseconds
+  memoryLimit Int      @default(128)  // MB
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  testCases   TestCase[]
+  submissions Submission[]
+  
+  @@map("problems")
+}
+
+model TestCase {
+  id        String  @id @default(cuid())
+  problemId String
+  input     String
+  output    String
+  isHidden  Boolean @default(true) // All test cases hidden from frontend
+  points    Int     @default(10)
+  
+  problem Problem @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  
+  @@map("test_cases")
+}
+
+model Submission {
+  id        String   @id @default(cuid())
+  problemId String
+  code      String
+  language  String
+  status    String   // PENDING, RUNNING, COMPLETED, ERROR
+  score     Int?
+  results   Json?    // Store test case results
+  createdAt DateTime @default(now())
+  
+  problem Problem @relation(fields: [problemId], references: [id])
+  
+  @@map("submissions")
+}
