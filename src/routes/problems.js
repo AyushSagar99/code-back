@@ -25,7 +25,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Get single problem (without test cases)
+// Get single problem (with visible test cases only)
 router.get('/:id', async (req, res) => {
   try {
     const problem = await prisma.problem.findUnique({
@@ -37,6 +37,18 @@ router.get('/:id', async (req, res) => {
         difficulty: true,
         timeLimit: true,
         memoryLimit: true,
+        testCases: {
+          where: {
+            isHidden: false // ✅ Only include visible test cases
+          },
+          select: {
+            id: true,
+            input: true,
+            output: true,
+            points: true,
+            // Don't include isHidden field in response
+          }
+        }
       }
     });
     

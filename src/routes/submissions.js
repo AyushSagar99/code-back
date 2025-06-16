@@ -22,7 +22,7 @@ const LANGUAGE_IDS = {
 // Submission rate limiting
 const submissionLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10, // Limit each IP to 10 submissions per windowMs
+  max: 20, // Limit each IP to 10 submissions per windowMs
   message: 'Too many submissions, please try again later.',
 });
 
@@ -68,57 +68,59 @@ router.post('/', submissionLimiter, async (req, res) => {
     let overallStatus = 'Accepted';
 
     for (const testCase of problem.testCases) {
-      try {
-        const result = await executeCode(
-          code,
-          language,
-          testCase.input,
-          testCase.output, // ✅ Using 'output' field from your schema
-          problem.timeLimit,
-          problem.memoryLimit
-        );
-
-        testCaseResults.push({
-          input: testCase.input,
-          expectedOutput: testCase.output, // ✅ Map to expected name for frontend
-          actualOutput: result.output,
-          passed: result.passed,
-          executionTime: result.executionTime,
-          memoryUsed: result.memoryUsed,
-          status: result.status,
-          error: result.error
-        });
-
-        if (!result.passed) {
-          allTestsPassed = false;
-          overallStatus = result.status;
-        }
-
-        // Update submission with first test case results  
-        await prisma.submission.update({
-          where: { id: submission.id },
-          data: {
+        try {
+          const result = await executeCode(
+            code,
+            language,
+            testCase.input,
+            testCase.output,
+            problem.timeLimit,
+            problem.memoryLimit
+          );
+      
+          testCaseResults.push({
+            input: testCase.input,
+            expectedOutput: testCase.output,
+            actualOutput: result.output,
+            passed: result.passed,
+            executionTime: result.executionTime,
+            memoryUsed: result.memoryUsed,
             status: result.status,
-            results: testCaseResults, // Store all test results in JSON field
-          },
-        });
-
-      } catch (error) {
-        console.error(`Test case execution failed:`, error);
-        testCaseResults.push({
-          input: testCase.input,
-          expectedOutput: testCase.output,
-          actualOutput: '',
-          passed: false,
-          executionTime: 0,
-          memoryUsed: 0,
-          status: 'Runtime Error',
-          error: error.message
-        });
-        allTestsPassed = false;
-        overallStatus = 'Runtime Error';
+            error: result.error,
+            isHidden: testCase.isHidden // ✅ Include hidden flag in results
+          });
+      
+          if (!result.passed) {
+            allTestsPassed = false;
+            overallStatus = result.status;
+          }
+      
+          // Update submission with current test case results  
+          await prisma.submission.update({
+            where: { id: submission.id },
+            data: {
+              status: result.status,
+              results: testCaseResults,
+            },
+          });
+      
+        } catch (error) {
+          console.error(`Test case execution failed:`, error);
+          testCaseResults.push({
+            input: testCase.input,
+            expectedOutput: testCase.output,
+            actualOutput: '',
+            passed: false,
+            executionTime: 0,
+            memoryUsed: 0,
+            status: 'Runtime Error',
+            error: error.message,
+            isHidden: testCase.isHidden // ✅ Include hidden flag even for errors
+          });
+          allTestsPassed = false;
+          overallStatus = 'Runtime Error';
+        }
       }
-    }
 
     // Final update with overall results
     const totalScore = testCaseResults.reduce((sum, result) => 
@@ -173,147 +175,123 @@ router.get('/:id', async (req, res) => {
 });
 
 // Execute code using Judge0 
+// Update your executeCode function in submissions.js
+
 async function executeCode(code, language, input, expectedOutput, timeLimit, memoryLimit) {
-  try {
-    const languageId = LANGUAGE_IDS[language];
-    
-    // Detect if using local or RapidAPI Judge0
-    const isLocal = JUDGE0_URL.includes('localhost') || JUDGE0_URL.includes('127.0.0.1');
-    const headers = isLocal ? {
-      'Content-Type': 'application/json'
-    } : {
-      'Content-Type': 'application/json',
-      'X-RapidAPI-Key': RAPIDAPI_KEY,
-      'X-RapidAPI-Host': 'judge0-ce.p.rapidapi.com'
+    const languageMap = {
+      'javascript': { id: 63, name: 'JavaScript (Node.js 12.14.0)' },
+      'python': { id: 71, name: 'Python (3.8.1)' },
+      'java': { id: 62, name: 'Java (OpenJDK 13.0.1)' },
+      'cpp': { id: 54, name: 'C++ (GCC 9.2.0)' },
+      'c': { id: 50, name: 'C (GCC 9.2.0)' }
     };
+  
+    const languageConfig = languageMap[language];
+    if (!languageConfig) {
+      throw new Error(`Unsupported language: ${language}`);
+    }
+  
+    // ✅ FIX: Ensure proper input format for Judge0
+    const formattedInput = input.trim(); // Remove any extra whitespace
     
-    console.log(`Executing code with ${isLocal ? 'Local' : 'RapidAPI'} Judge0...`);
-    
-    // Submit to Judge0 - USE CONSISTENT ENCODING
-    const submissionResponse = await axios.post(`${JUDGE0_URL}/submissions?base64_encoded=false`, {
-      source_code: code,           // ✅ Plain text
-      language_id: languageId,
-      stdin: input,                // ✅ Plain text  
-      expected_output: expectedOutput.trim(), // ✅ Plain text
-      cpu_time_limit: timeLimit / 1000,
-      memory_limit: memoryLimit * 1024,
-    }, {
-      headers: headers
-    });
-
-    console.log(`📝 Input sent to Judge0 (plain text):`, JSON.stringify(input));
-    console.log(`📝 Expected output (plain text):`, JSON.stringify(expectedOutput));
-    console.log(`📝 Using base64_encoded=false for consistent encoding`);
-
-    const { token } = submissionResponse.data;
-    console.log(`Submission created with token: ${token}`);
-
-    // Poll for result
-    let result;
-    let attempts = 0;
-    const maxAttempts = 30;
-
-    do {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      const statusResponse = await axios.get(`${JUDGE0_URL}/submissions/${token}`, {
-        headers: headers
+    console.log('📝 Input sent to Judge0 (plain text):', JSON.stringify(formattedInput));
+    console.log('📝 Expected output (plain text):', JSON.stringify(expectedOutput));
+    console.log('📝 Using base64_encoded=false for consistent encoding');
+  
+    const submissionData = {
+      source_code: code,
+      language_id: languageConfig.id,
+      stdin: formattedInput,  // ✅ Raw input, not base64
+      expected_output: expectedOutput.trim(), // ✅ Raw expected output
+      cpu_time_limit: (timeLimit / 1000).toFixed(1), // Convert ms to seconds
+      memory_limit: memoryLimit * 1024, // Convert MB to KB
+      base64_encoded: false, // ✅ Use plain text, not base64
+    };
+  
+    try {
+      // Create submission
+      const submissionResponse = await fetch(`${JUDGE0_URL}/submissions?base64_encoded=false&wait=false`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-RapidAPI-Key': RAPIDAPI_KEY,
+          'X-RapidAPI-Host': 'judge0-ce.p.rapidapi.com'
+        },
+        body: JSON.stringify(submissionData)
       });
+  
+      if (!submissionResponse.ok) {
+        const errorText = await submissionResponse.text();
+        throw new Error(`Judge0 submission failed: ${submissionResponse.status} ${errorText}`);
+      }
+  
+      const { token } = await submissionResponse.json();
+      console.log(`Submission created with token: ${token}`);
+  
+      // Poll for results
+      let attempts = 0;
+      const maxAttempts = 10;
       
-      result = statusResponse.data;
-      attempts++;
-      console.log(`Polling attempt ${attempts}, status: ${result.status.description}`);
-    } while (result.status.id <= 2 && attempts < maxAttempts);
-
-    if (attempts >= maxAttempts) {
-      throw new Error('Execution timeout - maximum polling attempts reached');
-    }
-
-    const executionTime = result.time ? parseFloat(result.time) * 1000 : 0;
-    const memoryUsed = result.memory || 0;
-    const status = result.status.description;
-    
-    // Clean output and error strings - NO BASE64 DECODING NEEDED
-    let output = '';
-    let error = '';
-    
-    if (result.stdout) {
-      // With base64_encoded=false, stdout should be plain text
-      output = result.stdout.toString()
-        .replace(/\0/g, '') 
-        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
-        .trim();
-    }
-    
-    if (result.stderr) {
-      // With base64_encoded=false, stderr should be plain text  
-      error = result.stderr.toString()
-        .replace(/\0/g, '')
-        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
-    }
-
-    // Check if output matches expected output
-    const actualOutput = output.trim();
-    const expectedOutputTrimmed = expectedOutput.trim();
-    const outputMatches = actualOutput === expectedOutputTrimmed;
-    
-    // More lenient pass/fail logic
-    const actuallyPassed = result.status.id === 3 || (result.status.id === 4 && outputMatches);
-
-    // 🚨 DEBUG: Log detailed comparison
-    console.log(`Execution result for token ${token}:`, {
-      status: result.status,
-      actualOutput: JSON.stringify(actualOutput),
-      expectedOutput: JSON.stringify(expectedOutputTrimmed), 
-      outputMatches: outputMatches,
-      passed: actuallyPassed,
-      rawStdout: result.stdout
-    });
-
-    return {
-      status: result.status.description,
-      passed: actuallyPassed,
-      executionTime: executionTime,
-      memoryUsed: memoryUsed,
-      output: output,
-      error: error || null
-    };
-
-  } catch (error) {
-    console.error('Judge0 execution error:', error.response?.data || error.message);
-    
-    // Handle specific errors
-    if (error.response?.status === 429) {
+      while (attempts < maxAttempts) {
+        attempts++;
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+        
+        const resultResponse = await fetch(`${JUDGE0_URL}/submissions/${token}?base64_encoded=false`, {
+          headers: {
+            'X-RapidAPI-Key': RAPIDAPI_KEY,
+            'X-RapidAPI-Host': 'judge0-ce.p.rapidapi.com'
+          }
+        });
+  
+        if (!resultResponse.ok) {
+          throw new Error(`Failed to get submission result: ${resultResponse.status}`);
+        }
+  
+        const result = await resultResponse.json();
+        console.log(`Polling attempt ${attempts}, status: ${result.status?.description || 'Unknown'}`);
+  
+        // Check if execution is complete
+        if (result.status && result.status.id >= 3) { // 3+ means completed (success or error)
+          console.log('Execution result for token', token + ':', {
+            status: result.status,
+            actualOutput: JSON.stringify(result.stdout || ''),
+            expectedOutput: JSON.stringify(expectedOutput),
+            outputMatches: (result.stdout || '').trim() === expectedOutput.trim(),
+            passed: (result.stdout || '').trim() === expectedOutput.trim() && result.status.id === 3,
+            rawStdout: result.stdout
+          });
+  
+          // ✅ FIX: Proper output comparison
+          const actualOutput = (result.stdout || '').trim();
+          const expectedOutputTrimmed = expectedOutput.trim();
+          const passed = actualOutput === expectedOutputTrimmed && result.status.id === 3;
+  
+          return {
+            passed,
+            output: actualOutput,
+            expectedOutput: expectedOutputTrimmed,
+            executionTime: parseFloat(result.time || '0') * 1000, // Convert to ms
+            memoryUsed: Math.round((result.memory || 0) / 1024), // Convert to MB
+            status: result.status?.description || 'Unknown',
+            error: result.stderr || (result.compile_output ? `Compilation Error: ${result.compile_output}` : null)
+          };
+        }
+      }
+  
+      throw new Error('Execution timeout - submission took too long');
+  
+    } catch (error) {
+      console.error('Judge0 execution error:', error);
       return {
         passed: false,
+        output: '',
+        expectedOutput,
         executionTime: 0,
         memoryUsed: 0,
-        status: 'Rate Limited',
-        output: '',
-        error: 'Too many requests. Please try again later.',
+        status: 'Error',
+        error: error.message
       };
     }
-    
-    if (error.response?.status === 401) {
-      return {
-        passed: false,
-        executionTime: 0,
-        memoryUsed: 0,
-        status: 'Authentication Error',
-        output: '',
-        error: 'Invalid API key configuration.',
-      };
-    }
-    
-    return {
-      passed: false,
-      executionTime: 0,
-      memoryUsed: 0,
-      status: 'Runtime Error',
-      output: '',
-      error: error.response?.data?.error || error.message,
-    };
   }
-}
 
 export default router;

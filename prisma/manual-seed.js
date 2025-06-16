@@ -1,4 +1,4 @@
-// manual-seed.js - Run with: node manual-seed.js
+
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
@@ -17,16 +17,16 @@ You may assume that each input would have exactly one solution, and you may not 
 
 You can return the answer in any order.
 
-**Example 1:**
+**TEST CASE 1:**
 Input: nums = [2,7,11,15], target = 9
 Output: [0,1]
 Explanation: Because nums[0] + nums[1] == 9, we return [0, 1].
 
-**Example 2:**
+**TEST CASE 2:**
 Input: nums = [3,2,4], target = 6
 Output: [1,2]
 
-**Example 3:**
+**TEST CASE 3:**
 Input: nums = [3,3], target = 6
 Output: [0,1]`,
         difficulty: 'Easy',
@@ -38,21 +38,25 @@ Output: [0,1]`,
               input: '2,7,11,15\n9',
               output: '0,1',
               points: 25,
+              isHidden: false, // ✅ Visible test case 1
             },
             {
               input: '3,2,4\n6',
               output: '1,2',
               points: 25,
+              isHidden: false, // ✅ Visible test case 2
             },
             {
               input: '3,3\n6',
               output: '0,1',
               points: 25,
+              isHidden: false, // ✅ Visible test case 3
             },
             {
               input: '-1,-2,-3,-4,-5\n-8',
               output: '2,4',
               points: 25,
+              isHidden: true, // 🔒 Hidden test case 4
             },
           ],
         },
@@ -67,9 +71,13 @@ Output: [0,1]`,
       where: { problemId: problem.id }
     });
 
-    console.log('✅ Created', testCases.length, 'test cases');
-    console.log('🔍 First test case input:', JSON.stringify(testCases[0].input));
-    console.log('🔍 Has brackets?', testCases[0].input.includes('['));
+    const visibleTests = testCases.filter(tc => !tc.isHidden);
+    const hiddenTests = testCases.filter(tc => tc.isHidden);
+
+    console.log('✅ Created', testCases.length, 'total test cases');
+    console.log('👁️  Visible test cases:', visibleTests.length);
+    console.log('🔒 Hidden test cases:', hiddenTests.length);
+    console.log('🔍 First visible test case input:', JSON.stringify(visibleTests[0]?.input));
 
     console.log('🎉 Manual seed completed successfully!');
 
