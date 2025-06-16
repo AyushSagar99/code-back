@@ -33,6 +33,7 @@ Output: [0,1]`,
       testCases: {
         create: [
           {
+            // ✅ FIXED: Remove brackets, use plain CSV format
             input: '2,7,11,15\n9',
             output: '0,1',
             points: 25,

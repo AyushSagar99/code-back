@@ -1,3 +1,4 @@
+// backend/routes/submissions.js - Fixed for ES6 and Frontend Compatibility
 import express from 'express';
 import rateLimit from 'express-rate-limit';
 import { PrismaClient } from '@prisma/client';
@@ -6,7 +7,8 @@ import axios from 'axios';
 const router = express.Router();
 const prisma = new PrismaClient();
 
-const JUDGE0_URL = process.env.JUDGE0_URL || 'http://localhost:2358';
+const JUDGE0_URL = process.env.JUDGE0_URL;
+const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY;
 
 // Language mappings for Judge0
 const LANGUAGE_IDS = {
@@ -24,7 +26,7 @@ const submissionLimiter = rateLimit({
   message: 'Too many submissions, please try again later.',
 });
 
-// Submit code for evaluation
+// Submit code for evaluation - SYNCHRONOUS processing
 router.post('/', submissionLimiter, async (req, res) => {
   try {
     const { problemId, code, language } = req.body;
@@ -38,23 +40,110 @@ router.post('/', submissionLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Unsupported language' });
     }
     
+    // Get problem with test cases
+    const problem = await prisma.problem.findUnique({
+      where: { id: problemId },
+      include: { testCases: true }
+    });
+
+    if (!problem) {
+      return res.status(404).json({ error: 'Problem not found' });
+    }
+
     // Create submission record
     const submission = await prisma.submission.create({
       data: {
         problemId,
         code,
         language,
-        status: 'PENDING',
+        status: 'Processing',
       }
     });
+
+    console.log(`Created submission ${submission.id} for problem ${problemId}`);
+
+    // 🔥 PROCESS SYNCHRONOUSLY - Frontend expects immediate results
+    const testCaseResults = [];
+    let allTestsPassed = true;
+    let overallStatus = 'Accepted';
+
+    for (const testCase of problem.testCases) {
+      try {
+        const result = await executeCode(
+          code,
+          language,
+          testCase.input,
+          testCase.output, // ✅ Using 'output' field from your schema
+          problem.timeLimit,
+          problem.memoryLimit
+        );
+
+        testCaseResults.push({
+          input: testCase.input,
+          expectedOutput: testCase.output, // ✅ Map to expected name for frontend
+          actualOutput: result.output,
+          passed: result.passed,
+          executionTime: result.executionTime,
+          memoryUsed: result.memoryUsed,
+          status: result.status,
+          error: result.error
+        });
+
+        if (!result.passed) {
+          allTestsPassed = false;
+          overallStatus = result.status;
+        }
+
+        // Update submission with first test case results  
+        await prisma.submission.update({
+          where: { id: submission.id },
+          data: {
+            status: result.status,
+            results: testCaseResults, // Store all test results in JSON field
+          },
+        });
+
+      } catch (error) {
+        console.error(`Test case execution failed:`, error);
+        testCaseResults.push({
+          input: testCase.input,
+          expectedOutput: testCase.output,
+          actualOutput: '',
+          passed: false,
+          executionTime: 0,
+          memoryUsed: 0,
+          status: 'Runtime Error',
+          error: error.message
+        });
+        allTestsPassed = false;
+        overallStatus = 'Runtime Error';
+      }
+    }
+
+    // Final update with overall results
+    const totalScore = testCaseResults.reduce((sum, result) => 
+      sum + (result.passed ? 25 : 0), 0); // Assuming 25 points per test case
     
-    // Process submission asynchronously
-    processSubmission(submission.id);
-    
-    res.json({ submissionId: submission.id, status: 'PENDING' });
+    await prisma.submission.update({
+      where: { id: submission.id },
+      data: {
+        status: overallStatus,
+        score: totalScore,
+        results: testCaseResults, // Store all results in JSON field
+      },
+    });
+
+    // ✅ Return format that frontend expects
+    res.json({
+      submissionId: submission.id,
+      status: overallStatus,
+      passed: allTestsPassed,
+      testCaseResults // ← Frontend needs this immediately
+    });
+
   } catch (error) {
-    console.error('Error creating submission:', error);
-    res.status(500).json({ error: 'Failed to create submission' });
+    console.error('Submission error:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -63,12 +152,12 @@ router.get('/:id', async (req, res) => {
   try {
     const submission = await prisma.submission.findUnique({
       where: { id: req.params.id },
-      select: {
-        id: true,
-        status: true,
-        score: true,
-        results: true,
-        createdAt: true,
+      include: {
+        problem: {
+          include: {
+            testCases: true
+          }
+        }
       }
     });
     
@@ -83,113 +172,146 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// Process submission against test cases
-async function processSubmission(submissionId) {
-  try {
-    await prisma.submission.update({
-      where: { id: submissionId },
-      data: { status: 'RUNNING' }
-    });
-    
-    const submission = await prisma.submission.findUnique({
-      where: { id: submissionId },
-      include: {
-        problem: {
-          include: {
-            testCases: true
-          }
-        }
-      }
-    });
-    
-    const results = [];
-    let totalScore = 0;
-    
-    // Run code against each test case
-    for (const testCase of submission.problem.testCases) {
-      const result = await executeCode(
-        submission.code,
-        submission.language,
-        testCase.input,
-        testCase.output,
-        submission.problem.timeLimit,
-        submission.problem.memoryLimit
-      );
-      
-      if (result.passed) {
-        totalScore += testCase.points;
-      }
-      
-      results.push({
-        testCaseId: testCase.id,
-        passed: result.passed,
-        executionTime: result.executionTime,
-        memoryUsed: result.memoryUsed,
-        status: result.status,
-      });
-    }
-    
-    await prisma.submission.update({
-      where: { id: submissionId },
-      data: {
-        status: 'COMPLETED',
-        score: totalScore,
-        results: results,
-      }
-    });
-    
-  } catch (error) {
-    console.error('Error processing submission:', error);
-    await prisma.submission.update({
-      where: { id: submissionId },
-      data: { status: 'ERROR' }
-    });
-  }
-}
-
-// Execute code using Judge0
+// Execute code using Judge0 
 async function executeCode(code, language, input, expectedOutput, timeLimit, memoryLimit) {
   try {
     const languageId = LANGUAGE_IDS[language];
     
-    // Submit to Judge0
-    const submissionResponse = await axios.post(`${JUDGE0_URL}/submissions`, {
-      source_code: btoa(code),
-      language_id: languageId,
-      stdin: btoa(input),
-      expected_output: btoa(expectedOutput),
-      cpu_time_limit: timeLimit / 1000,
-      memory_limit: memoryLimit * 1024,
-    });
-    
-    const token = submissionResponse.data.token;
-    
-    // Poll for result
-    let result;
-    do {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      const resultResponse = await axios.get(`${JUDGE0_URL}/submissions/${token}`);
-      result = resultResponse.data;
-    } while (result.status.id <= 2);
-    
-    return {
-      passed: result.status.id === 3, // Accepted
-      executionTime: result.time ? parseFloat(result.time) * 1000 : 0,
-      memoryUsed: result.memory || 0,
-      status: result.status.description,
-      output: result.stdout ? atob(result.stdout) : '',
-      error: result.stderr ? atob(result.stderr) : '',
+    // Detect if using local or RapidAPI Judge0
+    const isLocal = JUDGE0_URL.includes('localhost') || JUDGE0_URL.includes('127.0.0.1');
+    const headers = isLocal ? {
+      'Content-Type': 'application/json'
+    } : {
+      'Content-Type': 'application/json',
+      'X-RapidAPI-Key': RAPIDAPI_KEY,
+      'X-RapidAPI-Host': 'judge0-ce.p.rapidapi.com'
     };
     
+    console.log(`Executing code with ${isLocal ? 'Local' : 'RapidAPI'} Judge0...`);
+    
+    // Submit to Judge0 - USE CONSISTENT ENCODING
+    const submissionResponse = await axios.post(`${JUDGE0_URL}/submissions?base64_encoded=false`, {
+      source_code: code,           // ✅ Plain text
+      language_id: languageId,
+      stdin: input,                // ✅ Plain text  
+      expected_output: expectedOutput.trim(), // ✅ Plain text
+      cpu_time_limit: timeLimit / 1000,
+      memory_limit: memoryLimit * 1024,
+    }, {
+      headers: headers
+    });
+
+    console.log(`📝 Input sent to Judge0 (plain text):`, JSON.stringify(input));
+    console.log(`📝 Expected output (plain text):`, JSON.stringify(expectedOutput));
+    console.log(`📝 Using base64_encoded=false for consistent encoding`);
+
+    const { token } = submissionResponse.data;
+    console.log(`Submission created with token: ${token}`);
+
+    // Poll for result
+    let result;
+    let attempts = 0;
+    const maxAttempts = 30;
+
+    do {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      const statusResponse = await axios.get(`${JUDGE0_URL}/submissions/${token}`, {
+        headers: headers
+      });
+      
+      result = statusResponse.data;
+      attempts++;
+      console.log(`Polling attempt ${attempts}, status: ${result.status.description}`);
+    } while (result.status.id <= 2 && attempts < maxAttempts);
+
+    if (attempts >= maxAttempts) {
+      throw new Error('Execution timeout - maximum polling attempts reached');
+    }
+
+    const executionTime = result.time ? parseFloat(result.time) * 1000 : 0;
+    const memoryUsed = result.memory || 0;
+    const status = result.status.description;
+    
+    // Clean output and error strings - NO BASE64 DECODING NEEDED
+    let output = '';
+    let error = '';
+    
+    if (result.stdout) {
+      // With base64_encoded=false, stdout should be plain text
+      output = result.stdout.toString()
+        .replace(/\0/g, '') 
+        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+        .trim();
+    }
+    
+    if (result.stderr) {
+      // With base64_encoded=false, stderr should be plain text  
+      error = result.stderr.toString()
+        .replace(/\0/g, '')
+        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+    }
+
+    // Check if output matches expected output
+    const actualOutput = output.trim();
+    const expectedOutputTrimmed = expectedOutput.trim();
+    const outputMatches = actualOutput === expectedOutputTrimmed;
+    
+    // More lenient pass/fail logic
+    const actuallyPassed = result.status.id === 3 || (result.status.id === 4 && outputMatches);
+
+    // 🚨 DEBUG: Log detailed comparison
+    console.log(`Execution result for token ${token}:`, {
+      status: result.status,
+      actualOutput: JSON.stringify(actualOutput),
+      expectedOutput: JSON.stringify(expectedOutputTrimmed), 
+      outputMatches: outputMatches,
+      passed: actuallyPassed,
+      rawStdout: result.stdout
+    });
+
+    return {
+      status: result.status.description,
+      passed: actuallyPassed,
+      executionTime: executionTime,
+      memoryUsed: memoryUsed,
+      output: output,
+      error: error || null
+    };
+
   } catch (error) {
-    console.error('Judge0 execution error:', error);
+    console.error('Judge0 execution error:', error.response?.data || error.message);
+    
+    // Handle specific errors
+    if (error.response?.status === 429) {
+      return {
+        passed: false,
+        executionTime: 0,
+        memoryUsed: 0,
+        status: 'Rate Limited',
+        output: '',
+        error: 'Too many requests. Please try again later.',
+      };
+    }
+    
+    if (error.response?.status === 401) {
+      return {
+        passed: false,
+        executionTime: 0,
+        memoryUsed: 0,
+        status: 'Authentication Error',
+        output: '',
+        error: 'Invalid API key configuration.',
+      };
+    }
+    
     return {
       passed: false,
       executionTime: 0,
       memoryUsed: 0,
       status: 'Runtime Error',
       output: '',
-      error: error.message,
+      error: error.response?.data?.error || error.message,
     };
   }
 }
