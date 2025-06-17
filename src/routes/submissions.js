@@ -1,51 +1,179 @@
-// backend/routes/submissions.js - Fixed for ES6 and Frontend Compatibility
+// Update your submissions.js file with AWS Judge0 endpoints
+
 import express from 'express';
-import rateLimit from 'express-rate-limit';
 import { PrismaClient } from '@prisma/client';
-import axios from 'axios';
 
 const router = express.Router();
 const prisma = new PrismaClient();
 
-const JUDGE0_URL = process.env.JUDGE0_URL;
-const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY;
+// ✅ AWS Judge0 Configuration
+const JUDGE0_BASE_URL = 'http://13.61.195.9:2358';
 
-// Language mappings for Judge0
+// Language ID mapping for Judge0
 const LANGUAGE_IDS = {
-  'javascript': 63,
-  'python': 71,
-  'java': 62,
-  'cpp': 54,
-  'c': 50,
+  'javascript': 63,  // JavaScript (Node.js 12.14.0)
+  'python': 71,      // Python (3.8.1)
+  'java': 62,        // Java (OpenJDK 13.0.1)
+  'cpp': 54,         // C++ (GCC 9.2.0)
+  'c': 50           // C (GCC 9.2.0)
 };
 
-// Submission rate limiting
-const submissionLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 20, // Limit each IP to 10 submissions per windowMs
-  message: 'Too many submissions, please try again later.',
+// ✅ Updated executeCode function for AWS Judge0
+async function executeCode(code, language, input, expectedOutput, timeLimit, memoryLimit) {
+  const languageId = LANGUAGE_IDS[language];
+  if (!languageId) {
+    throw new Error(`Unsupported language: ${language}`);
+  }
+
+  // Format input and expected output
+  const formattedInput = input.trim();
+  const formattedExpectedOutput = expectedOutput.trim();
+  
+  console.log('📝 Input sent to AWS Judge0:', JSON.stringify(formattedInput));
+  console.log('📝 Expected output:', JSON.stringify(formattedExpectedOutput));
+
+  const submissionData = {
+    source_code: code,
+    language_id: languageId,
+    stdin: formattedInput,
+    expected_output: formattedExpectedOutput,
+    cpu_time_limit: (timeLimit / 1000).toFixed(1), // Convert ms to seconds
+    memory_limit: memoryLimit * 1024, // Convert MB to KB
+    base64_encoded: false
+  };
+
+  try {
+    // ✅ Create submission on AWS Judge0
+    console.log('🚀 Submitting to AWS Judge0...');
+    const submissionResponse = await fetch(`${JUDGE0_BASE_URL}/submissions?base64_encoded=false&wait=false`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+        // ✅ No API key needed for AWS instance!
+      },
+      body: JSON.stringify(submissionData)
+    });
+
+    if (!submissionResponse.ok) {
+      const errorText = await submissionResponse.text();
+      console.error('❌ AWS Judge0 submission failed:', submissionResponse.status, errorText);
+      throw new Error(`AWS Judge0 submission failed: ${submissionResponse.status} ${errorText}`);
+    }
+
+    const { token } = await submissionResponse.json();
+    console.log(`✅ Submission created with token: ${token}`);
+
+    // ✅ Poll for results on AWS Judge0
+    let attempts = 0;
+    const maxAttempts = 15; // Increased for AWS instance
+    
+    while (attempts < maxAttempts) {
+      attempts++;
+      await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+      
+      console.log(`🔄 Polling attempt ${attempts}/${maxAttempts}...`);
+      
+      const resultResponse = await fetch(`${JUDGE0_BASE_URL}/submissions/${token}?base64_encoded=false`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!resultResponse.ok) {
+        console.error('❌ Failed to get result:', resultResponse.status);
+        throw new Error(`Failed to get submission result: ${resultResponse.status}`);
+      }
+
+      const result = await resultResponse.json();
+      console.log(`📊 Status: ${result.status?.description || 'Unknown'}`);
+
+      // Check if execution is complete
+      if (result.status && result.status.id >= 3) { // 3+ means completed (success or error)
+        const actualOutput = (result.stdout || '').trim();
+        const passed = actualOutput === formattedExpectedOutput && result.status.id === 3;
+        
+        console.log('✅ Execution completed:', {
+          token,
+          status: result.status,
+          actualOutput: JSON.stringify(actualOutput),
+          expectedOutput: JSON.stringify(formattedExpectedOutput),
+          outputMatches: actualOutput === formattedExpectedOutput,
+          passed,
+          rawStdout: result.stdout,
+          stderr: result.stderr
+        });
+
+        return {
+          passed,
+          output: actualOutput,
+          expectedOutput: formattedExpectedOutput,
+          executionTime: parseFloat(result.time || '0') * 1000, // Convert to ms
+          memoryUsed: Math.round((result.memory || 0) / 1024), // Convert to MB
+          status: result.status?.description || 'Unknown',
+          error: result.stderr || (result.compile_output ? `Compilation Error: ${result.compile_output}` : null)
+        };
+      }
+    }
+
+    throw new Error('Execution timeout - submission took too long');
+
+  } catch (error) {
+    console.error('❌ AWS Judge0 execution error:', error);
+    return {
+      passed: false,
+      output: '',
+      expectedOutput: formattedExpectedOutput,
+      executionTime: 0,
+      memoryUsed: 0,
+      status: 'Error',
+      error: error.message
+    };
+  }
+}
+
+// ✅ Test endpoint to verify AWS Judge0 connection
+router.get('/test-judge0', async (req, res) => {
+  try {
+    console.log('🧪 Testing AWS Judge0 connection...');
+    
+    // Simple test code
+    const testCode = 'console.log("Hello World");';
+    const result = await executeCode(testCode, 'javascript', '', 'Hello World', 2000, 256);
+    
+    res.json({
+      message: 'AWS Judge0 test completed',
+      result,
+      judge0Url: JUDGE0_BASE_URL
+    });
+  } catch (error) {
+    console.error('❌ Judge0 test failed:', error);
+    res.status(500).json({
+      error: 'AWS Judge0 test failed',
+      message: error.message,
+      judge0Url: JUDGE0_BASE_URL
+    });
+  }
 });
 
-// Submit code for evaluation - SYNCHRONOUS processing
-router.post('/', submissionLimiter, async (req, res) => {
+// ✅ Main submission endpoint (same as before, but uses AWS Judge0)
+router.post('/', async (req, res) => {
   try {
     const { problemId, code, language } = req.body;
     
-    // Validate inputs
+    // Validate input
     if (!problemId || !code || !language) {
-      return res.status(400).json({ error: 'Missing required fields' });
+      return res.status(400).json({ 
+        error: 'Missing required fields: problemId, code, and language are required' 
+      });
     }
-    
-    if (!LANGUAGE_IDS[language]) {
-      return res.status(400).json({ error: 'Unsupported language' });
-    }
-    
+
     // Get problem with test cases
     const problem = await prisma.problem.findUnique({
       where: { id: problemId },
       include: { testCases: true }
     });
-
+    
     if (!problem) {
       return res.status(404).json({ error: 'Problem not found' });
     }
@@ -56,109 +184,138 @@ router.post('/', submissionLimiter, async (req, res) => {
         problemId,
         code,
         language,
-        status: 'Processing',
+        status: 'PENDING'
       }
     });
+    
+    console.log('🎯 Processing submission:', submission.id);
+    console.log('🔧 Language:', language);
+    console.log('📝 Code length:', code.length, 'characters');
+    console.log('🧪 Test cases:', problem.testCases.length);
 
-    console.log(`Created submission ${submission.id} for problem ${problemId}`);
-
-    // 🔥 PROCESS SYNCHRONOUSLY - Frontend expects immediate results
-    const testCaseResults = [];
+    let testCaseResults = [];
     let allTestsPassed = true;
     let overallStatus = 'Accepted';
-
-    for (const testCase of problem.testCases) {
-        try {
-          const result = await executeCode(
-            code,
-            language,
-            testCase.input,
-            testCase.output,
-            problem.timeLimit,
-            problem.memoryLimit
-          );
-      
-          testCaseResults.push({
-            input: testCase.input,
-            expectedOutput: testCase.output,
-            actualOutput: result.output,
-            passed: result.passed,
-            executionTime: result.executionTime,
-            memoryUsed: result.memoryUsed,
-            status: result.status,
-            error: result.error,
-            isHidden: testCase.isHidden // ✅ Include hidden flag in results
-          });
-      
-          if (!result.passed) {
-            allTestsPassed = false;
-            overallStatus = result.status;
-          }
-      
-          // Update submission with current test case results  
-          await prisma.submission.update({
-            where: { id: submission.id },
-            data: {
-              status: result.status,
-              results: testCaseResults,
-            },
-          });
-      
-        } catch (error) {
-          console.error(`Test case execution failed:`, error);
-          testCaseResults.push({
-            input: testCase.input,
-            expectedOutput: testCase.output,
-            actualOutput: '',
-            passed: false,
-            executionTime: 0,
-            memoryUsed: 0,
-            status: 'Runtime Error',
-            error: error.message,
-            isHidden: testCase.isHidden // ✅ Include hidden flag even for errors
-          });
+    
+    try {
+      // ✅ Execute against all test cases using AWS Judge0
+      for (const [index, testCase] of problem.testCases.entries()) {
+        console.log(`\n🔄 Executing test case ${index + 1}/${problem.testCases.length}`);
+        console.log('📥 Input:', JSON.stringify(testCase.input));
+        console.log('🎯 Expected:', JSON.stringify(testCase.output));
+        
+        const result = await executeCode(
+          code,
+          language,
+          testCase.input,
+          testCase.output,
+          problem.timeLimit,
+          problem.memoryLimit
+        );
+        
+        console.log('📤 Result:', {
+          passed: result.passed,
+          output: JSON.stringify(result.output),
+          status: result.status,
+          time: result.executionTime + 'ms'
+        });
+        
+        testCaseResults.push({
+          input: testCase.input,
+          expectedOutput: testCase.output,
+          actualOutput: result.output,
+          passed: result.passed,
+          executionTime: result.executionTime,
+          memoryUsed: result.memoryUsed,
+          status: result.status,
+          error: result.error,
+          isHidden: testCase.isHidden
+        });
+        
+        if (!result.passed) {
           allTestsPassed = false;
-          overallStatus = 'Runtime Error';
+          overallStatus = result.status;
+          console.log('❌ Test case failed, continuing with remaining tests...');
         }
       }
-
-    // Final update with overall results
-    const totalScore = testCaseResults.reduce((sum, result) => 
-      sum + (result.passed ? 25 : 0), 0); // Assuming 25 points per test case
-    
-    await prisma.submission.update({
-      where: { id: submission.id },
-      data: {
+      
+      // Calculate score
+      const passedTests = testCaseResults.filter(result => result.passed).length;
+      const totalPoints = problem.testCases.reduce((sum, tc) => sum + tc.points, 0);
+      const score = Math.round((passedTests / problem.testCases.length) * totalPoints);
+      
+      // Update submission with results
+      await prisma.submission.update({
+        where: { id: submission.id },
+        data: {
+          status: overallStatus,
+          score,
+          results: testCaseResults,
+        },
+      });
+      
+      console.log('\n✅ Submission completed:', {
+        submissionId: submission.id,
         status: overallStatus,
-        score: totalScore,
-        results: testCaseResults, // Store all results in JSON field
-      },
-    });
-
-    // ✅ Return format that frontend expects
-    res.json({
-      submissionId: submission.id,
-      status: overallStatus,
-      passed: allTestsPassed,
-      testCaseResults // ← Frontend needs this immediately
-    });
-
+        passed: allTestsPassed,
+        score: `${score}/${totalPoints}`,
+        passedTests: `${passedTests}/${problem.testCases.length}`
+      });
+      
+      // Return response (hide hidden test case details)
+      res.json({
+        submissionId: submission.id,
+        status: overallStatus,
+        passed: allTestsPassed,
+        score,
+        testCaseResults: testCaseResults.map(result => ({
+          ...result,
+          // Hide details for hidden test cases
+          input: result.isHidden ? '[Hidden]' : result.input,
+          expectedOutput: result.isHidden ? '[Hidden]' : result.expectedOutput,
+          actualOutput: result.isHidden ? (result.passed ? '[Hidden - Passed]' : '[Hidden - Failed]') : result.actualOutput
+        }))
+      });
+      
+    } catch (error) {
+      console.error('❌ Execution error:', error);
+      
+      // Update submission with error
+      await prisma.submission.update({
+        where: { id: submission.id },
+        data: {
+          status: 'ERROR',
+          results: [{
+            passed: false,
+            status: 'System Error',
+            error: error.message
+          }]
+        },
+      });
+      
+      res.status(500).json({
+        submissionId: submission.id,
+        status: 'Error',
+        passed: false,
+        error: error.message,
+        testCaseResults: []
+      });
+    }
+    
   } catch (error) {
-    console.error('Submission error:', error);
+    console.error('❌ Submission failed:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// Get submission status
+// ✅ Get submission endpoint (same as before)
 router.get('/:id', async (req, res) => {
   try {
     const submission = await prisma.submission.findUnique({
       where: { id: req.params.id },
-      include: {
+      include: { 
         problem: {
-          include: {
-            testCases: true
-          }
+          include: { testCases: true }
         }
       }
     });
@@ -169,129 +326,9 @@ router.get('/:id', async (req, res) => {
     
     res.json(submission);
   } catch (error) {
-    console.error('Error fetching submission:', error);
-    res.status(500).json({ error: 'Failed to fetch submission' });
+    console.error('Failed to get submission:', error);
+    res.status(500).json({ error: error.message });
   }
 });
-
-// Execute code using Judge0 
-// Update your executeCode function in submissions.js
-
-async function executeCode(code, language, input, expectedOutput, timeLimit, memoryLimit) {
-    const languageMap = {
-      'javascript': { id: 63, name: 'JavaScript (Node.js 12.14.0)' },
-      'python': { id: 71, name: 'Python (3.8.1)' },
-      'java': { id: 62, name: 'Java (OpenJDK 13.0.1)' },
-      'cpp': { id: 54, name: 'C++ (GCC 9.2.0)' },
-      'c': { id: 50, name: 'C (GCC 9.2.0)' }
-    };
-  
-    const languageConfig = languageMap[language];
-    if (!languageConfig) {
-      throw new Error(`Unsupported language: ${language}`);
-    }
-  
-    // ✅ FIX: Ensure proper input format for Judge0
-    const formattedInput = input.trim(); // Remove any extra whitespace
-    
-    console.log('📝 Input sent to Judge0 (plain text):', JSON.stringify(formattedInput));
-    console.log('📝 Expected output (plain text):', JSON.stringify(expectedOutput));
-    console.log('📝 Using base64_encoded=false for consistent encoding');
-  
-    const submissionData = {
-      source_code: code,
-      language_id: languageConfig.id,
-      stdin: formattedInput,  // ✅ Raw input, not base64
-      expected_output: expectedOutput.trim(), // ✅ Raw expected output
-      cpu_time_limit: (timeLimit / 1000).toFixed(1), // Convert ms to seconds
-      memory_limit: memoryLimit * 1024, // Convert MB to KB
-      base64_encoded: false, // ✅ Use plain text, not base64
-    };
-  
-    try {
-      // Create submission
-      const submissionResponse = await fetch(`${JUDGE0_URL}/submissions?base64_encoded=false&wait=false`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-RapidAPI-Key': RAPIDAPI_KEY,
-          'X-RapidAPI-Host': 'judge0-ce.p.rapidapi.com'
-        },
-        body: JSON.stringify(submissionData)
-      });
-  
-      if (!submissionResponse.ok) {
-        const errorText = await submissionResponse.text();
-        throw new Error(`Judge0 submission failed: ${submissionResponse.status} ${errorText}`);
-      }
-  
-      const { token } = await submissionResponse.json();
-      console.log(`Submission created with token: ${token}`);
-  
-      // Poll for results
-      let attempts = 0;
-      const maxAttempts = 10;
-      
-      while (attempts < maxAttempts) {
-        attempts++;
-        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
-        
-        const resultResponse = await fetch(`${JUDGE0_URL}/submissions/${token}?base64_encoded=false`, {
-          headers: {
-            'X-RapidAPI-Key': RAPIDAPI_KEY,
-            'X-RapidAPI-Host': 'judge0-ce.p.rapidapi.com'
-          }
-        });
-  
-        if (!resultResponse.ok) {
-          throw new Error(`Failed to get submission result: ${resultResponse.status}`);
-        }
-  
-        const result = await resultResponse.json();
-        console.log(`Polling attempt ${attempts}, status: ${result.status?.description || 'Unknown'}`);
-  
-        // Check if execution is complete
-        if (result.status && result.status.id >= 3) { // 3+ means completed (success or error)
-          console.log('Execution result for token', token + ':', {
-            status: result.status,
-            actualOutput: JSON.stringify(result.stdout || ''),
-            expectedOutput: JSON.stringify(expectedOutput),
-            outputMatches: (result.stdout || '').trim() === expectedOutput.trim(),
-            passed: (result.stdout || '').trim() === expectedOutput.trim() && result.status.id === 3,
-            rawStdout: result.stdout
-          });
-  
-          // ✅ FIX: Proper output comparison
-          const actualOutput = (result.stdout || '').trim();
-          const expectedOutputTrimmed = expectedOutput.trim();
-          const passed = actualOutput === expectedOutputTrimmed && result.status.id === 3;
-  
-          return {
-            passed,
-            output: actualOutput,
-            expectedOutput: expectedOutputTrimmed,
-            executionTime: parseFloat(result.time || '0') * 1000, // Convert to ms
-            memoryUsed: Math.round((result.memory || 0) / 1024), // Convert to MB
-            status: result.status?.description || 'Unknown',
-            error: result.stderr || (result.compile_output ? `Compilation Error: ${result.compile_output}` : null)
-          };
-        }
-      }
-  
-      throw new Error('Execution timeout - submission took too long');
-  
-    } catch (error) {
-      console.error('Judge0 execution error:', error);
-      return {
-        passed: false,
-        output: '',
-        expectedOutput,
-        executionTime: 0,
-        memoryUsed: 0,
-        status: 'Error',
-        error: error.message
-      };
-    }
-  }
 
 export default router;
