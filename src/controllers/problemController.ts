@@ -1,5 +1,7 @@
-// src/controllers/problemController.js
+// src/controllers/problemController.ts
+import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
+import { CreateProblemRequest, ProblemStats } from '../types/index.js';
 
 const prisma = new PrismaClient();
 
@@ -7,7 +9,7 @@ const prisma = new PrismaClient();
  * Get all problems (without test cases)
  * @route GET /api/problems
  */
-export const getAllProblems = async (req, res) => {
+export const getAllProblems = async (req: Request, res: Response) => {
   try {
     console.log('📋 Fetching all problems...');
     
@@ -27,10 +29,11 @@ export const getAllProblems = async (req, res) => {
     res.json(problems);
     
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     console.error('❌ Error fetching problems:', error);
     res.status(500).json({ 
       error: 'Failed to fetch problems',
-      message: error.message 
+      message: errorMessage 
     });
   }
 };
@@ -39,7 +42,7 @@ export const getAllProblems = async (req, res) => {
  * Get single problem with visible test cases
  * @route GET /api/problems/:id
  */
-export const getProblemById = async (req, res) => {
+export const getProblemById = async (req: Request<{ id: string }>, res: Response) => {
   try {
     const { id } = req.params;
     console.log(`🔍 Fetching problem: ${id}`);
@@ -79,10 +82,11 @@ export const getProblemById = async (req, res) => {
     res.json(problem);
     
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     console.error('❌ Error fetching problem:', error);
     res.status(500).json({ 
       error: 'Failed to fetch problem',
-      message: error.message 
+      message: errorMessage 
     });
   }
 };
@@ -91,7 +95,7 @@ export const getProblemById = async (req, res) => {
  * Create a new problem (Admin only - future feature)
  * @route POST /api/problems
  */
-export const createProblem = async (req, res) => {
+export const createProblem = async (req: Request<{}, {}, CreateProblemRequest>, res: Response) => {
   try {
     const { title, description, difficulty, timeLimit, memoryLimit } = req.body;
     
@@ -119,10 +123,11 @@ export const createProblem = async (req, res) => {
     res.status(201).json(problem);
     
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     console.error('❌ Error creating problem:', error);
     res.status(500).json({ 
       error: 'Failed to create problem',
-      message: error.message 
+      message: errorMessage 
     });
   }
 };
@@ -131,7 +136,7 @@ export const createProblem = async (req, res) => {
  * Update a problem (Admin only - future feature)
  * @route PUT /api/problems/:id
  */
-export const updateProblem = async (req, res) => {
+export const updateProblem = async (req: Request<{ id: string }, {}, Partial<CreateProblemRequest>>, res: Response) => {
   try {
     const { id } = req.params;
     const updateData = req.body;
@@ -147,14 +152,15 @@ export const updateProblem = async (req, res) => {
     res.json(problem);
     
   } catch (error) {
-    if (error.code === 'P2025') {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'P2025') {
       return res.status(404).json({ error: 'Problem not found' });
     }
     
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     console.error('❌ Error updating problem:', error);
     res.status(500).json({ 
       error: 'Failed to update problem',
-      message: error.message 
+      message: errorMessage 
     });
   }
 };
@@ -163,7 +169,7 @@ export const updateProblem = async (req, res) => {
  * Delete a problem (Admin only - future feature)
  * @route DELETE /api/problems/:id
  */
-export const deleteProblem = async (req, res) => {
+export const deleteProblem = async (req: Request<{ id: string }>, res: Response) => {
   try {
     const { id } = req.params;
     
@@ -177,14 +183,15 @@ export const deleteProblem = async (req, res) => {
     res.status(204).send();
     
   } catch (error) {
-    if (error.code === 'P2025') {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'P2025') {
       return res.status(404).json({ error: 'Problem not found' });
     }
     
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     console.error('❌ Error deleting problem:', error);
     res.status(500).json({ 
       error: 'Failed to delete problem',
-      message: error.message 
+      message: errorMessage 
     });
   }
 };
@@ -193,7 +200,7 @@ export const deleteProblem = async (req, res) => {
  * Get problem statistics
  * @route GET /api/problems/:id/stats
  */
-export const getProblemStats = async (req, res) => {
+export const getProblemStats = async (req: Request<{ id: string }>, res: Response) => {
   try {
     const { id } = req.params;
     
@@ -223,26 +230,27 @@ export const getProblemStats = async (req, res) => {
       _avg: { score: true }
     });
     
-    const result = {
+    const result: ProblemStats = {
       problemId: id,
       totalSubmissions,
       successfulSubmissions,
-      successRate: totalSubmissions > 0 ? (successfulSubmissions / totalSubmissions * 100).toFixed(2) : 0,
-      averageScore: avgScore._avg.score?.toFixed(2) || 0,
+      successRate: totalSubmissions > 0 ? (successfulSubmissions / totalSubmissions * 100).toFixed(2) : '0',
+      averageScore: avgScore._avg.score?.toFixed(2) || '0',
       statusBreakdown: stats.reduce((acc, stat) => {
         acc[stat.status] = stat._count.status;
         return acc;
-      }, {})
+      }, {} as Record<string, number>)
     };
     
     console.log(`✅ Stats calculated for problem: ${id}`);
     res.json(result);
     
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     console.error('❌ Error fetching problem stats:', error);
     res.status(500).json({ 
       error: 'Failed to fetch problem statistics',
-      message: error.message 
+      message: errorMessage 
     });
   }
 };

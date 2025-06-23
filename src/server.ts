@@ -1,5 +1,5 @@
-// src/server.js - Updated server with cleaner structure
-import express from 'express';
+// src/server.ts
+import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import { PrismaClient } from '@prisma/client';
 
@@ -17,7 +17,7 @@ app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 // Request logging middleware
-app.use((req, res, next) => {
+app.use((req: Request, res: Response, next: NextFunction) => {
   const timestamp = new Date().toISOString();
   console.log(`[${timestamp}] ${req.method} ${req.path}`);
   next();
@@ -28,9 +28,9 @@ app.use('/api/problems', problemRoutes);
 app.use('/api/submissions', submissionRoutes);
 
 // Health check endpoint
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
+app.get('/health', (req: Request, res: Response) => {
+  res.json({
+    status: 'OK',
     timestamp: new Date().toISOString(),
     message: 'Code Judge Server is running!',
     version: '1.0.0'
@@ -38,7 +38,7 @@ app.get('/health', (req, res) => {
 });
 
 // API info endpoint
-app.get('/api', (req, res) => {
+app.get('/api', (req: Request, res: Response) => {
   res.json({
     message: 'Code Judge API',
     version: '1.0.0',
@@ -52,27 +52,27 @@ app.get('/api', (req, res) => {
 });
 
 // Global error handling middleware
-app.use((err, req, res, next) => {
+app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
   console.error('🚨 Server Error:', err);
   
   // Prisma-specific errors
-  if (err.code && err.code.startsWith('P')) {
-    return res.status(400).json({ 
+  if ('code' in err && typeof err.code === 'string' && err.code.startsWith('P')) {
+    return res.status(400).json({
       error: 'Database error',
       message: 'Invalid request or data constraint violation'
     });
   }
   
   // Default error response
-  res.status(500).json({ 
+  res.status(500).json({
     error: 'Internal server error',
     message: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong!'
   });
 });
 
 // 404 handler for unknown routes
-app.use((req, res) => {
-  res.status(404).json({ 
+app.use((req: Request, res: Response) => {
+  res.status(404).json({
     error: 'Route not found',
     path: req.path,
     method: req.method,

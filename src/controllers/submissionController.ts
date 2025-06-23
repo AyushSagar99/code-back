@@ -1,15 +1,25 @@
-// src/controllers/submissionController.js
+// src/controllers/submissionController.ts
+import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
-
+import {
+  TestCase,
+  TestCaseResult,
+  ExecutionResult,
+  Judge0SubmissionData,
+  Judge0Result,
+  SupportedLanguage,
+  LanguageMapping,
+  SubmitCodeRequest,
+  Problem
+} from '../types/index.js';
 
 const prisma = new PrismaClient();
 
 // ✅ AWS Judge0 Configuration
-const JUDGE0_BASE_URL = process.env.JUDGE0_BASE_URL;
-
+const JUDGE0_BASE_URL = process.env.JUDGE0_BASE_URL as string;
 
 // Language ID mapping for Judge0
-const LANGUAGE_IDS = {
+const LANGUAGE_IDS: LanguageMapping = {
   'javascript': 63,  // JavaScript (Node.js 12.14.0)
   'python': 71,      // Python (3.8.1)
   'java': 62,        // Java (OpenJDK 13.0.1)
@@ -18,7 +28,14 @@ const LANGUAGE_IDS = {
 };
 
 // ✅ FAST executeCode function with optimized polling
-async function executeCode(code, language, input, expectedOutput, timeLimit, memoryLimit) {
+async function executeCode(
+  code: string,
+  language: SupportedLanguage,
+  input: string,
+  expectedOutput: string,
+  timeLimit: number,
+  memoryLimit: number
+): Promise<ExecutionResult> {
   const languageId = LANGUAGE_IDS[language];
   if (!languageId) {
     throw new Error(`Unsupported language: ${language}`);
@@ -27,7 +44,7 @@ async function executeCode(code, language, input, expectedOutput, timeLimit, mem
   const formattedInput = input.trim();
   const formattedExpectedOutput = expectedOutput.trim();
 
-  const submissionData = {
+  const submissionData: Judge0SubmissionData = {
     source_code: code,
     language_id: languageId,
     stdin: formattedInput,
@@ -50,7 +67,7 @@ async function executeCode(code, language, input, expectedOutput, timeLimit, mem
       throw new Error(`Judge0 submission failed: ${submissionResponse.status} ${errorText}`);
     }
 
-    const { token } = await submissionResponse.json();
+    const { token }: { token: string } = await submissionResponse.json();
 
     // ✅ OPTIMIZED POLLING with exponential backoff
     let attempts = 0;
@@ -72,7 +89,7 @@ async function executeCode(code, language, input, expectedOutput, timeLimit, mem
         throw new Error(`Failed to get submission result: ${resultResponse.status}`);
       }
 
-      const result = await resultResponse.json();
+      const result: Judge0Result = await resultResponse.json();
 
       // Check if execution is complete
       if (result.status && result.status.id >= 3) {
@@ -86,7 +103,7 @@ async function executeCode(code, language, input, expectedOutput, timeLimit, mem
           executionTime: parseFloat(result.time || '0') * 1000,
           memoryUsed: Math.round((result.memory || 0) / 1024),
           status: result.status?.description || 'Unknown',
-          error: result.stderr || (result.compile_output ? `Compilation Error: ${result.compile_output}` : null)
+          error: result.stderr || (result.compile_output ? `Compilation Error: ${result.compile_output}` : undefined)
         };
       }
 
@@ -97,6 +114,7 @@ async function executeCode(code, language, input, expectedOutput, timeLimit, mem
     throw new Error('Execution timeout');
 
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return {
       passed: false,
       output: '',
@@ -104,13 +122,19 @@ async function executeCode(code, language, input, expectedOutput, timeLimit, mem
       executionTime: 0,
       memoryUsed: 0,
       status: 'Error',
-      error: error.message
+      error: errorMessage
     };
   }
 }
 
 // ✅ PARALLEL execution function for multiple test cases
-async function executeTestCasesInParallel(code, language, testCases, timeLimit, memoryLimit) {
+async function executeTestCasesInParallel(
+  code: string,
+  language: SupportedLanguage,
+  testCases: TestCase[],
+  timeLimit: number,
+  memoryLimit: number
+): Promise<TestCaseResult[]> {
   console.log(`🚀 Executing ${testCases.length} test cases in PARALLEL...`);
   
   // Execute all test cases simultaneously
@@ -149,7 +173,12 @@ async function executeTestCasesInParallel(code, language, testCases, timeLimit, 
 }
 
 // ✅ Background processing function
-async function processSubmissionInBackground(submissionId, problem, code, language) {
+async function processSubmissionInBackground(
+  submissionId: string,
+  problem: Problem,
+  code: string,
+  language: SupportedLanguage
+): Promise<void> {
   try {
     console.log(`🔄 Background processing submission: ${submissionId}`);
     
@@ -163,7 +192,7 @@ async function processSubmissionInBackground(submissionId, problem, code, langua
     const testCaseResults = await executeTestCasesInParallel(
       code,
       language,
-      problem.testCases,
+      problem.testCases || [],
       problem.timeLimit,
       problem.memoryLimit
     );
@@ -171,8 +200,8 @@ async function processSubmissionInBackground(submissionId, problem, code, langua
     // Calculate results
     const allTestsPassed = testCaseResults.every(result => result.passed);
     const passedTests = testCaseResults.filter(result => result.passed).length;
-    const totalPoints = problem.testCases.reduce((sum, tc) => sum + tc.points, 0);
-    const score = Math.round((passedTests / problem.testCases.length) * totalPoints);
+    const totalPoints = (problem.testCases || []).reduce((sum, tc) => sum + tc.points, 0);
+    const score = Math.round((passedTests / (problem.testCases || []).length) * totalPoints);
     const overallStatus = allTestsPassed ? 'Accepted' : 'Wrong Answer';
     
     // Update submission with results
@@ -181,7 +210,7 @@ async function processSubmissionInBackground(submissionId, problem, code, langua
       data: {
         status: 'COMPLETED',
         score,
-        results: testCaseResults,
+        results: testCaseResults as any, // Prisma JSON type
       },
     });
     
@@ -189,10 +218,11 @@ async function processSubmissionInBackground(submissionId, problem, code, langua
       status: overallStatus,
       passed: allTestsPassed,
       score: `${score}/${totalPoints}`,
-      passedTests: `${passedTests}/${problem.testCases.length}`
+      passedTests: `${passedTests}/${(problem.testCases || []).length}`
     });
     
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     console.error(`❌ Background processing failed for ${submissionId}:`, error);
     
     await prisma.submission.update({
@@ -202,8 +232,8 @@ async function processSubmissionInBackground(submissionId, problem, code, langua
         results: [{
           passed: false,
           status: 'System Error',
-          error: error.message
-        }]
+          error: errorMessage
+        }] as any
       },
     });
   }
@@ -213,7 +243,7 @@ async function processSubmissionInBackground(submissionId, problem, code, langua
  * Submit code for async processing (immediate response)
  * @route POST /api/submissions
  */
-export const submitCodeAsync = async (req, res) => {
+export const submitCodeAsync = async (req: Request<{}, {}, SubmitCodeRequest>, res: Response) => {
   try {
     const { problemId, code, language } = req.body;
     
@@ -271,10 +301,11 @@ export const submitCodeAsync = async (req, res) => {
     processSubmissionInBackground(submission.id, problem, code, language);
     
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     console.error('❌ Async submission failed:', error);
     res.status(500).json({ 
       error: 'Submission failed',
-      message: error.message 
+      message: errorMessage 
     });
   }
 };
@@ -283,7 +314,7 @@ export const submitCodeAsync = async (req, res) => {
  * Submit code and wait for results (synchronous)
  * @route POST /api/submissions/sync
  */
-export const submitCodeSync = async (req, res) => {
+export const submitCodeSync = async (req: Request<{}, {}, SubmitCodeRequest>, res: Response) => {
   try {
     const { problemId, code, language } = req.body;
     
@@ -352,7 +383,7 @@ export const submitCodeSync = async (req, res) => {
       data: {
         status: 'COMPLETED',
         score,
-        results: testCaseResults,
+        results: testCaseResults as any,
       },
     });
     
@@ -375,10 +406,11 @@ export const submitCodeSync = async (req, res) => {
     });
     
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     console.error('❌ Sync submission failed:', error);
     res.status(500).json({ 
       error: 'Submission failed',
-      message: error.message 
+      message: errorMessage 
     });
   }
 };
@@ -387,7 +419,7 @@ export const submitCodeSync = async (req, res) => {
  * Get submission by ID
  * @route GET /api/submissions/:id
  */
-export const getSubmissionById = async (req, res) => {
+export const getSubmissionById = async (req: Request<{ id: string }>, res: Response) => {
   try {
     const { id } = req.params;
     
@@ -409,7 +441,7 @@ export const getSubmissionById = async (req, res) => {
     // Format response based on status
     const response = {
       ...submission,
-      testCaseResults: submission.results ? submission.results.map(result => ({
+      testCaseResults: submission.results ? (submission.results as TestCaseResult[]).map(result => ({
         ...result,
         // Hide details for hidden test cases in the response
         input: result.isHidden ? '[Hidden]' : result.input,
@@ -422,10 +454,11 @@ export const getSubmissionById = async (req, res) => {
     res.json(response);
     
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     console.error('❌ Failed to get submission:', error);
     res.status(500).json({ 
       error: 'Failed to fetch submission',
-      message: error.message 
+      message: errorMessage 
     });
   }
 };
@@ -434,10 +467,13 @@ export const getSubmissionById = async (req, res) => {
  * Get all submissions for a problem
  * @route GET /api/submissions/problem/:problemId
  */
-export const getSubmissionsByProblem = async (req, res) => {
+export const getSubmissionsByProblem = async (
+  req: Request<{ problemId: string }, {}, {}, { limit?: string; offset?: string }>,
+  res: Response
+) => {
   try {
     const { problemId } = req.params;
-    const { limit = 50, offset = 0 } = req.query;
+    const { limit = '50', offset = '0' } = req.query;
     
     console.log(`📋 Fetching submissions for problem: ${problemId}`);
     
@@ -461,10 +497,11 @@ export const getSubmissionsByProblem = async (req, res) => {
     res.json(submissions);
     
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     console.error('❌ Failed to get submissions:', error);
     res.status(500).json({ 
       error: 'Failed to fetch submissions',
-      message: error.message 
+      message: errorMessage 
     });
   }
 };
@@ -473,7 +510,7 @@ export const getSubmissionsByProblem = async (req, res) => {
  * Test Judge0 connection
  * @route GET /api/submissions/test-judge0
  */
-export const testJudge0 = async (req, res) => {
+export const testJudge0 = async (req: Request, res: Response) => {
   try {
     console.log('🧪 Testing AWS Judge0 with timing...');
     const startTime = Date.now();
@@ -491,10 +528,11 @@ export const testJudge0 = async (req, res) => {
       status: result.passed ? 'SUCCESS' : 'FAILED'
     });
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     console.error('❌ Judge0 test failed:', error);
     res.status(500).json({
       error: 'AWS Judge0 test failed',
-      message: error.message,
+      message: errorMessage,
       judge0Url: JUDGE0_BASE_URL
     });
   }

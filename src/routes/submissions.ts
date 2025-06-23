@@ -1,4 +1,4 @@
-// src/routes/submissions.js - Clean routes using controllers
+// src/routes/submissions.ts
 import express from 'express';
 import {
   submitCodeAsync,

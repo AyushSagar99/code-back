@@ -1,4 +1,4 @@
-// src/routes/problems.js - Clean routes using controllers
+// src/routes/problems.ts
 import express from 'express';
 import {
   getAllProblems,
