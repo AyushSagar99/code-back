@@ -1,5 +1,5 @@
 // src/controllers/submissionController.ts
-import { Request, Response } from 'express';
+import { Request, Response, NextFunction } from 'express';
 import { PrismaClient } from '@prisma/client';
 import {
   TestCase,
@@ -15,10 +15,8 @@ import {
 
 const prisma = new PrismaClient();
 
-// ✅ AWS Judge0 Configuration
-const JUDGE0_BASE_URL = process.env.JUDGE0_BASE_URL as string;
+const JUDGE0_BASE_URL ="http://56.228.79.60:2358";
 
-// Language ID mapping for Judge0
 const LANGUAGE_IDS: LanguageMapping = {
   'javascript': 63,  // JavaScript (Node.js 12.14.0)
   'python': 71,      // Python (3.8.1)
@@ -243,23 +241,29 @@ async function processSubmissionInBackground(
  * Submit code for async processing (immediate response)
  * @route POST /api/submissions
  */
-export const submitCodeAsync = async (req: Request<{}, {}, SubmitCodeRequest>, res: Response) => {
+export const submitCodeAsync = async (
+  req: Request<{}, {}, SubmitCodeRequest>, 
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
   try {
     const { problemId, code, language } = req.body;
     
     // Validation
     if (!problemId || !code || !language) {
-      return res.status(400).json({ 
+      res.status(400).json({ 
         error: 'Missing required fields: problemId, code, and language are required' 
       });
+      return;
     }
 
     // Validate language
     if (!LANGUAGE_IDS[language]) {
-      return res.status(400).json({
+      res.status(400).json({
         error: 'Unsupported language',
         supportedLanguages: Object.keys(LANGUAGE_IDS)
       });
+      return;
     }
 
     console.log(`🎯 Processing async submission for problem: ${problemId}`);
@@ -271,11 +275,13 @@ export const submitCodeAsync = async (req: Request<{}, {}, SubmitCodeRequest>, r
     });
     
     if (!problem) {
-      return res.status(404).json({ error: 'Problem not found' });
+      res.status(404).json({ error: 'Problem not found' });
+      return;
     }
 
     if (problem.testCases.length === 0) {
-      return res.status(400).json({ error: 'Problem has no test cases' });
+      res.status(400).json({ error: 'Problem has no test cases' });
+      return;
     }
 
     // Create submission record
@@ -301,12 +307,7 @@ export const submitCodeAsync = async (req: Request<{}, {}, SubmitCodeRequest>, r
     processSubmissionInBackground(submission.id, problem, code, language);
     
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.error('❌ Async submission failed:', error);
-    res.status(500).json({ 
-      error: 'Submission failed',
-      message: errorMessage 
-    });
+    next(error);
   }
 };
 
@@ -314,23 +315,29 @@ export const submitCodeAsync = async (req: Request<{}, {}, SubmitCodeRequest>, r
  * Submit code and wait for results (synchronous)
  * @route POST /api/submissions/sync
  */
-export const submitCodeSync = async (req: Request<{}, {}, SubmitCodeRequest>, res: Response) => {
+export const submitCodeSync = async (
+  req: Request<{}, {}, SubmitCodeRequest>, 
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
   try {
     const { problemId, code, language } = req.body;
     
     // Validation
     if (!problemId || !code || !language) {
-      return res.status(400).json({ 
+      res.status(400).json({ 
         error: 'Missing required fields: problemId, code, and language are required' 
       });
+      return;
     }
 
     // Validate language
     if (!LANGUAGE_IDS[language]) {
-      return res.status(400).json({
+      res.status(400).json({
         error: 'Unsupported language',
         supportedLanguages: Object.keys(LANGUAGE_IDS)
       });
+      return;
     }
 
     console.log(`🚀 Processing sync submission for problem: ${problemId}`);
@@ -341,11 +348,13 @@ export const submitCodeSync = async (req: Request<{}, {}, SubmitCodeRequest>, re
     });
     
     if (!problem) {
-      return res.status(404).json({ error: 'Problem not found' });
+      res.status(404).json({ error: 'Problem not found' });
+      return;
     }
 
     if (problem.testCases.length === 0) {
-      return res.status(400).json({ error: 'Problem has no test cases' });
+      res.status(400).json({ error: 'Problem has no test cases' });
+      return;
     }
 
     const submission = await prisma.submission.create({
@@ -406,12 +415,7 @@ export const submitCodeSync = async (req: Request<{}, {}, SubmitCodeRequest>, re
     });
     
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.error('❌ Sync submission failed:', error);
-    res.status(500).json({ 
-      error: 'Submission failed',
-      message: errorMessage 
-    });
+    next(error);
   }
 };
 
@@ -419,7 +423,11 @@ export const submitCodeSync = async (req: Request<{}, {}, SubmitCodeRequest>, re
  * Get submission by ID
  * @route GET /api/submissions/:id
  */
-export const getSubmissionById = async (req: Request<{ id: string }>, res: Response) => {
+export const getSubmissionById = async (
+  req: Request<{ id: string }>, 
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
   try {
     const { id } = req.params;
     
@@ -435,7 +443,8 @@ export const getSubmissionById = async (req: Request<{ id: string }>, res: Respo
     });
     
     if (!submission) {
-      return res.status(404).json({ error: 'Submission not found' });
+      res.status(404).json({ error: 'Submission not found' });
+      return;
     }
     
     // Format response based on status
@@ -454,12 +463,7 @@ export const getSubmissionById = async (req: Request<{ id: string }>, res: Respo
     res.json(response);
     
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.error('❌ Failed to get submission:', error);
-    res.status(500).json({ 
-      error: 'Failed to fetch submission',
-      message: errorMessage 
-    });
+    next(error);
   }
 };
 
@@ -469,8 +473,9 @@ export const getSubmissionById = async (req: Request<{ id: string }>, res: Respo
  */
 export const getSubmissionsByProblem = async (
   req: Request<{ problemId: string }, {}, {}, { limit?: string; offset?: string }>,
-  res: Response
-) => {
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
   try {
     const { problemId } = req.params;
     const { limit = '50', offset = '0' } = req.query;
@@ -497,12 +502,7 @@ export const getSubmissionsByProblem = async (
     res.json(submissions);
     
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.error('❌ Failed to get submissions:', error);
-    res.status(500).json({ 
-      error: 'Failed to fetch submissions',
-      message: errorMessage 
-    });
+    next(error);
   }
 };
 
@@ -510,7 +510,11 @@ export const getSubmissionsByProblem = async (
  * Test Judge0 connection
  * @route GET /api/submissions/test-judge0
  */
-export const testJudge0 = async (req: Request, res: Response) => {
+export const testJudge0 = async (
+  req: Request, 
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
   try {
     console.log('🧪 Testing AWS Judge0 with timing...');
     const startTime = Date.now();
@@ -528,12 +532,6 @@ export const testJudge0 = async (req: Request, res: Response) => {
       status: result.passed ? 'SUCCESS' : 'FAILED'
     });
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.error('❌ Judge0 test failed:', error);
-    res.status(500).json({
-      error: 'AWS Judge0 test failed',
-      message: errorMessage,
-      judge0Url: JUDGE0_BASE_URL
-    });
+    next(error);
   }
 };

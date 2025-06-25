@@ -6,7 +6,7 @@ import {
   getSubmissionById,
   getSubmissionsByProblem,
   testJudge0
-} from '../controllers/submissionController.js';
+} from '../controller/submission.controller.js';
 
 const router = express.Router();
 

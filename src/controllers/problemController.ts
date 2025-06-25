@@ -1,5 +1,5 @@
 // src/controllers/problemController.ts
-import { Request, Response } from 'express';
+import { Request, Response, NextFunction } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { CreateProblemRequest, ProblemStats } from '../types/index.js';
 
@@ -9,7 +9,11 @@ const prisma = new PrismaClient();
  * Get all problems (without test cases)
  * @route GET /api/problems
  */
-export const getAllProblems = async (req: Request, res: Response) => {
+export const getAllProblems = async (
+  req: Request, 
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
   try {
     console.log('📋 Fetching all problems...');
     
@@ -29,12 +33,7 @@ export const getAllProblems = async (req: Request, res: Response) => {
     res.json(problems);
     
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.error('❌ Error fetching problems:', error);
-    res.status(500).json({ 
-      error: 'Failed to fetch problems',
-      message: errorMessage 
-    });
+    next(error);
   }
 };
 
@@ -42,7 +41,11 @@ export const getAllProblems = async (req: Request, res: Response) => {
  * Get single problem with visible test cases
  * @route GET /api/problems/:id
  */
-export const getProblemById = async (req: Request<{ id: string }>, res: Response) => {
+export const getProblemById = async (
+  req: Request<{ id: string }>, 
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
   try {
     const { id } = req.params;
     console.log(`🔍 Fetching problem: ${id}`);
@@ -72,22 +75,18 @@ export const getProblemById = async (req: Request<{ id: string }>, res: Response
     
     if (!problem) {
       console.log(`❌ Problem not found: ${id}`);
-      return res.status(404).json({ 
+      res.status(404).json({ 
         error: 'Problem not found',
         problemId: id 
       });
+      return;
     }
     
     console.log(`✅ Found problem: ${problem.title}`);
     res.json(problem);
     
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.error('❌ Error fetching problem:', error);
-    res.status(500).json({ 
-      error: 'Failed to fetch problem',
-      message: errorMessage 
-    });
+    next(error);
   }
 };
 
@@ -95,16 +94,21 @@ export const getProblemById = async (req: Request<{ id: string }>, res: Response
  * Create a new problem (Admin only - future feature)
  * @route POST /api/problems
  */
-export const createProblem = async (req: Request<{}, {}, CreateProblemRequest>, res: Response) => {
+export const createProblem = async (
+  req: Request<{}, {}, CreateProblemRequest>, 
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
   try {
     const { title, description, difficulty, timeLimit, memoryLimit } = req.body;
     
     // Validation
     if (!title || !description || !difficulty) {
-      return res.status(400).json({
+      res.status(400).json({
         error: 'Missing required fields',
         required: ['title', 'description', 'difficulty']
       });
+      return;
     }
     
     console.log(`🆕 Creating new problem: ${title}`);
@@ -123,12 +127,7 @@ export const createProblem = async (req: Request<{}, {}, CreateProblemRequest>, 
     res.status(201).json(problem);
     
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.error('❌ Error creating problem:', error);
-    res.status(500).json({ 
-      error: 'Failed to create problem',
-      message: errorMessage 
-    });
+    next(error);
   }
 };
 
@@ -136,7 +135,11 @@ export const createProblem = async (req: Request<{}, {}, CreateProblemRequest>, 
  * Update a problem (Admin only - future feature)
  * @route PUT /api/problems/:id
  */
-export const updateProblem = async (req: Request<{ id: string }, {}, Partial<CreateProblemRequest>>, res: Response) => {
+export const updateProblem = async (
+  req: Request<{ id: string }, {}, Partial<CreateProblemRequest>>, 
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
   try {
     const { id } = req.params;
     const updateData = req.body;
@@ -153,15 +156,11 @@ export const updateProblem = async (req: Request<{ id: string }, {}, Partial<Cre
     
   } catch (error) {
     if (error && typeof error === 'object' && 'code' in error && error.code === 'P2025') {
-      return res.status(404).json({ error: 'Problem not found' });
+      res.status(404).json({ error: 'Problem not found' });
+      return;
     }
     
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.error('❌ Error updating problem:', error);
-    res.status(500).json({ 
-      error: 'Failed to update problem',
-      message: errorMessage 
-    });
+    next(error);
   }
 };
 
@@ -169,7 +168,11 @@ export const updateProblem = async (req: Request<{ id: string }, {}, Partial<Cre
  * Delete a problem (Admin only - future feature)
  * @route DELETE /api/problems/:id
  */
-export const deleteProblem = async (req: Request<{ id: string }>, res: Response) => {
+export const deleteProblem = async (
+  req: Request<{ id: string }>, 
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
   try {
     const { id } = req.params;
     
@@ -184,15 +187,11 @@ export const deleteProblem = async (req: Request<{ id: string }>, res: Response)
     
   } catch (error) {
     if (error && typeof error === 'object' && 'code' in error && error.code === 'P2025') {
-      return res.status(404).json({ error: 'Problem not found' });
+      res.status(404).json({ error: 'Problem not found' });
+      return;
     }
     
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.error('❌ Error deleting problem:', error);
-    res.status(500).json({ 
-      error: 'Failed to delete problem',
-      message: errorMessage 
-    });
+    next(error);
   }
 };
 
@@ -200,7 +199,11 @@ export const deleteProblem = async (req: Request<{ id: string }>, res: Response)
  * Get problem statistics
  * @route GET /api/problems/:id/stats
  */
-export const getProblemStats = async (req: Request<{ id: string }>, res: Response) => {
+export const getProblemStats = async (
+  req: Request<{ id: string }>, 
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
   try {
     const { id } = req.params;
     
@@ -246,11 +249,6 @@ export const getProblemStats = async (req: Request<{ id: string }>, res: Respons
     res.json(result);
     
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.error('❌ Error fetching problem stats:', error);
-    res.status(500).json({ 
-      error: 'Failed to fetch problem statistics',
-      message: errorMessage 
-    });
+    next(error);
   }
 };

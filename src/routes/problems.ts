@@ -1,4 +1,4 @@
-// src/routes/problems.ts
+// src/routes/problem.routes.ts
 import express from 'express';
 import {
   getAllProblems,
@@ -7,7 +7,7 @@ import {
   updateProblem,
   deleteProblem,
   getProblemStats
-} from '../controllers/problemController.js';
+} from '../controller/problem.controller.js'; // Fixed: Match your actual folder structure
 
 const router = express.Router();
 

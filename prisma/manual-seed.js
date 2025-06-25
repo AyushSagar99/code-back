@@ -1,5 +1,8 @@
-
 import { PrismaClient } from '@prisma/client';
+import dotenv from 'dotenv';
+
+// Load environment variables from .env file
+dotenv.config({ path: '../.env' }); 
 
 const prisma = new PrismaClient();
 
@@ -8,7 +11,7 @@ async function seed() {
     console.log('🌱 Starting manual seed...');
 
     // Create the Two Sum problem
-    const problem = await prisma.problem.create({
+    const twoSumProblem = await prisma.problem.create({
       data: {
         title: 'Two Sum',
         description: `Given an array of integers nums and an integer target, return indices of the two numbers such that they add up to target.
@@ -17,18 +20,24 @@ You may assume that each input would have exactly one solution, and you may not 
 
 You can return the answer in any order.
 
-**TEST CASE 1:**
+**Example 1:**
 Input: nums = [2,7,11,15], target = 9
 Output: [0,1]
 Explanation: Because nums[0] + nums[1] == 9, we return [0, 1].
 
-**TEST CASE 2:**
+**Example 2:**
 Input: nums = [3,2,4], target = 6
 Output: [1,2]
 
-**TEST CASE 3:**
+**Example 3:**
 Input: nums = [3,3], target = 6
-Output: [0,1]`,
+Output: [0,1]
+
+**Constraints:**
+• 2 ≤ nums.length ≤ 10⁴
+• -10⁹ ≤ nums[i] ≤ 10⁹
+• -10⁹ ≤ target ≤ 10⁹
+• Only one valid answer exists.`,
         difficulty: 'Easy',
         timeLimit: 2000,
         memoryLimit: 256,
@@ -63,23 +72,141 @@ Output: [0,1]`,
       },
     });
 
-    console.log('✅ Created problem:', problem.title);
-    console.log('✅ Problem ID:', problem.id);
+    console.log('✅ Created problem:', twoSumProblem.title);
+    console.log('✅ Problem ID:', twoSumProblem.id);
 
-    // Verify test cases were created
-    const testCases = await prisma.testCase.findMany({
-      where: { problemId: problem.id }
+    // Create the Valid Parentheses problem
+    const validParenthesesProblem = await prisma.problem.create({
+      data: {
+        title: 'Valid Parentheses',
+        description: `Given a string s containing just the characters '(', ')', '{', '}', '[' and ']', determine if the input string is valid.
+
+An input string is valid if:
+1. Open brackets must be closed by the same type of brackets.
+2. Open brackets must be closed in the correct order.
+3. Every close bracket has a corresponding open bracket of the same type.
+
+**Example 1:**
+Input: s = "()"
+Output: true
+
+**Example 2:**
+Input: s = "()[]{}"
+Output: true
+
+**Example 3:**
+Input: s = "(]"
+Output: false
+
+**Example 4:**
+Input: s = "([)]"
+Output: false
+
+**Example 5:**
+Input: s = "{[]}"
+Output: true
+
+**Constraints:**
+• 1 ≤ s.length ≤ 10⁴
+• s consists of parentheses only '()[]{}'.`,
+        difficulty: 'Easy',
+        timeLimit: 1000,
+        memoryLimit: 128,
+        testCases: {
+          create: [
+            {
+              input: '()',
+              output: 'true',
+              points: 20,
+              isHidden: false, // ✅ Visible test case 1
+            },
+            {
+              input: '()[]{)',
+              output: 'true',
+              points: 20,
+              isHidden: false, // ✅ Visible test case 2
+            },
+            {
+              input: '(]',
+              output: 'false',
+              points: 20,
+              isHidden: false, // ✅ Visible test case 3
+            },
+            {
+              input: '([)]',
+              output: 'false',
+              points: 20,
+              isHidden: false, // ✅ Visible test case 4
+            },
+            {
+              input: '{[]}',
+              output: 'true',
+              points: 20,
+              isHidden: false, // ✅ Visible test case 5
+            },
+            {
+              input: '',
+              output: 'true',
+              points: 10,
+              isHidden: true, // 🔒 Hidden test case 1 - empty string
+            },
+            {
+              input: '(((',
+              output: 'false',
+              points: 10,
+              isHidden: true, // 🔒 Hidden test case 2 - only opening brackets
+            },
+            {
+              input: ')))',
+              output: 'false',
+              points: 10,
+              isHidden: true, // 🔒 Hidden test case 3 - only closing brackets
+            },
+            {
+              input: '(){}[]',
+              output: 'true',
+              points: 10,
+              isHidden: true, // 🔒 Hidden test case 4 - all types valid
+            },
+            {
+              input: '([{}])',
+              output: 'true',
+              points: 10,
+              isHidden: true, // 🔒 Hidden test case 5 - nested valid
+            },
+          ],
+        },
+      },
     });
 
-    const visibleTests = testCases.filter(tc => !tc.isHidden);
-    const hiddenTests = testCases.filter(tc => tc.isHidden);
+    console.log('✅ Created problem:', validParenthesesProblem.title);
+    console.log('✅ Problem ID:', validParenthesesProblem.id);
 
-    console.log('✅ Created', testCases.length, 'total test cases');
-    console.log('👁️  Visible test cases:', visibleTests.length);
-    console.log('🔒 Hidden test cases:', hiddenTests.length);
-    console.log('🔍 First visible test case input:', JSON.stringify(visibleTests[0]?.input));
+    // Verify test cases for both problems
+    const allProblems = await prisma.problem.findMany({
+      include: {
+        testCases: true
+      }
+    });
 
-    console.log('🎉 Manual seed completed successfully!');
+    console.log('\n📊 SEED SUMMARY:');
+    console.log('================');
+    
+    for (const problem of allProblems) {
+      const visibleTests = problem.testCases.filter(tc => !tc.isHidden);
+      const hiddenTests = problem.testCases.filter(tc => tc.isHidden);
+      
+      console.log(`\n📝 ${problem.title}:`);
+      console.log(`   ├─ Difficulty: ${problem.difficulty}`);
+      console.log(`   ├─ Time Limit: ${problem.timeLimit}ms`);
+      console.log(`   ├─ Memory Limit: ${problem.memoryLimit}MB`);
+      console.log(`   ├─ Total Test Cases: ${problem.testCases.length}`);
+      console.log(`   ├─ 👁️  Visible: ${visibleTests.length}`);
+      console.log(`   └─ 🔒 Hidden: ${hiddenTests.length}`);
+    }
+
+    console.log('\n🎉 Manual seed completed successfully!');
+    console.log(`✅ Created ${allProblems.length} problems total`);
 
   } catch (error) {
     console.error('❌ Seed failed:', error);

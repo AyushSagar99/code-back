@@ -1,15 +1,29 @@
+// src/seeds/seed.ts
 import { PrismaClient } from '@prisma/client';
+import dotenv from 'dotenv';
+
+// Load environment variables from .env file
+dotenv.config(); // ✅ Fixed: Remove '../' since .env is in root
 
 const prisma = new PrismaClient();
 
-async function main() {
-  console.log('🌱 Starting database seed...');
+async function seed() {
+  try {
+    console.log('🌱 Starting manual seed...');
 
-  // Create first problem
-  const problem1 = await prisma.problem.create({
-    data: {
-      title: 'Two Sum',
-      description: `Given an array of integers nums and an integer target, return indices of the two numbers such that they add up to target.
+    // Check if problems already exist
+    const existingProblems = await prisma.problem.count();
+    if (existingProblems > 0) {
+      console.log(`⚠️  Found ${existingProblems} existing problems. Skipping seed to avoid duplicates.`);
+      console.log('💡 To re-seed, delete existing problems first or use --force flag');
+      return;
+    }
+
+    // Create the Two Sum problem
+    const twoSumProblem = await prisma.problem.create({
+      data: {
+        title: 'Two Sum',
+        description: `Given an array of integers nums and an integer target, return indices of the two numbers such that they add up to target.
 
 You may assume that each input would have exactly one solution, and you may not use the same element twice.
 
@@ -26,136 +40,232 @@ Output: [1,2]
 
 **Example 3:**
 Input: nums = [3,3], target = 6
-Output: [0,1]`,
-      difficulty: 'Easy',
-      timeLimit: 2000,
-      memoryLimit: 256,
-      testCases: {
-        create: [
-          {
-            // ✅ FIXED: Remove brackets, use plain CSV format
-            input: '2,7,11,15\n9',
-            output: '0,1',
-            points: 25,
-          },
-          {
-            input: '3,2,4\n6',
-            output: '1,2',
-            points: 25,
-          },
-          {
-            input: '3,3\n6',
-            output: '0,1',
-            points: 25,
-          },
-          {
-            input: '-1,-2,-3,-4,-5\n-8',
-            output: '2,4',
-            points: 25,
-          },
-        ],
+Output: [0,1]
+
+**Constraints:**
+• 2 ≤ nums.length ≤ 10⁴
+• -10⁹ ≤ nums[i] ≤ 10⁹
+• -10⁹ ≤ target ≤ 10⁹
+• Only one valid answer exists.`,
+        difficulty: 'EASY', // ✅ Fixed: Changed from 'Easy' to 'EASY' to match enum
+        timeLimit: 2000,
+        memoryLimit: 256,
+        testCases: {
+          create: [
+            {
+              input: '2,7,11,15\n9',
+              output: '0,1',
+              points: 25,
+              isHidden: false, // ✅ Visible test case 1
+            },
+            {
+              input: '3,2,4\n6',
+              output: '1,2',
+              points: 25,
+              isHidden: false, // ✅ Visible test case 2
+            },
+            {
+              input: '3,3\n6',
+              output: '0,1',
+              points: 25,
+              isHidden: false, // ✅ Visible test case 3
+            },
+            {
+              input: '-1,-2,-3,-4,-5\n-8',
+              output: '2,4',
+              points: 25,
+              isHidden: true, // 🔒 Hidden test case 4
+            },
+          ],
+        },
       },
-    },
-  });
+    });
 
-  // Create second problem
-  const problem2 = await prisma.problem.create({
-    data: {
-      title: 'Reverse String',
-      description: `Write a function that reverses a string. The input string is given as an array of characters s.
+    console.log('✅ Created problem:', twoSumProblem.title);
+    console.log('✅ Problem ID:', twoSumProblem.id);
 
-You must do this by modifying the input array in-place with O(1) extra memory.
+    // Create the Valid Parentheses problem
+    const validParenthesesProblem = await prisma.problem.create({
+      data: {
+        title: 'Valid Parentheses',
+        description: `Given a string s containing just the characters '(', ')', '{', '}', '[' and ']', determine if the input string is valid.
+
+An input string is valid if:
+1. Open brackets must be closed by the same type of brackets.
+2. Open brackets must be closed in the correct order.
+3. Every close bracket has a corresponding open bracket of the same type.
 
 **Example 1:**
-Input: s = ["h","e","l","l","o"]
-Output: ["o","l","l","e","h"]
-
-**Example 2:**
-Input: s = ["H","a","n","n","a","h"]
-Output: ["h","a","n","n","a","H"]`,
-      difficulty: 'Easy',
-      timeLimit: 1000,
-      memoryLimit: 128,
-      testCases: {
-        create: [
-          {
-            input: 'h,e,l,l,o',
-            output: 'o,l,l,e,h',
-            points: 50,
-          },
-          {
-            input: 'H,a,n,n,a,h',
-            output: 'h,a,n,n,a,H',
-            points: 50,
-          },
-        ],
-      },
-    },
-  });
-
-  // Create third problem
-  const problem3 = await prisma.problem.create({
-    data: {
-      title: 'Palindrome Number',
-      description: `Given an integer x, return true if x is a palindrome, and false otherwise.
-
-**Example 1:**
-Input: x = 121
+Input: s = "()"
 Output: true
-Explanation: 121 reads as 121 from left to right and from right to left.
 
 **Example 2:**
-Input: x = -121
-Output: false
-Explanation: From left to right, it reads -121. From right to left, it becomes 121-. Therefore it is not a palindrome.
+Input: s = "()[]{}"
+Output: true
 
 **Example 3:**
-Input: x = 10
+Input: s = "(]"
 Output: false
-Explanation: Reads 01 from right to left. Therefore it is not a palindrome.`,
-      difficulty: 'Easy',
-      timeLimit: 1500,
-      memoryLimit: 128,
-      testCases: {
-        create: [
-          {
-            input: '121',
-            output: 'true',
-            points: 25,
-          },
-          {
-            input: '-121',
-            output: 'false',
-            points: 25,
-          },
-          {
-            input: '10',
-            output: 'false',
-            points: 25,
-          },
-          {
-            input: '12321',
-            output: 'true',
-            points: 25,
-          },
-        ],
-      },
-    },
-  });
 
-  console.log('✅ Created problems:');
-  console.log(`  - ${problem1.title} (${problem1.id})`);
-  console.log(`  - ${problem2.title} (${problem2.id})`);
-  console.log(`  - ${problem3.title} (${problem3.id})`);
-  console.log('🌱 Database seeded successfully!');
+**Example 4:**
+Input: s = "([)]"
+Output: false
+
+**Example 5:**
+Input: s = "{[]}"
+Output: true
+
+**Constraints:**
+• 1 ≤ s.length ≤ 10⁴
+• s consists of parentheses only '()[]{}'.`,
+        difficulty: 'EASY', // ✅ Fixed: Changed from 'Easy' to 'EASY'
+        timeLimit: 1000,
+        memoryLimit: 128,
+        testCases: {
+          create: [
+            {
+              input: '()',
+              output: 'true',
+              points: 20,
+              isHidden: false, // ✅ Visible test case 1
+            },
+            {
+              input: '()[]{}',
+              output: 'true',
+              points: 20,
+              isHidden: false, // ✅ Visible test case 2
+            },
+            {
+              input: '(]',
+              output: 'false',
+              points: 20,
+              isHidden: false, // ✅ Visible test case 3
+            },
+            {
+              input: '([)]',
+              output: 'false',
+              points: 20,
+              isHidden: false, // ✅ Visible test case 4
+            },
+            {
+              input: '{[]}',
+              output: 'true',
+              points: 20,
+              isHidden: false, // ✅ Visible test case 5
+            },
+            {
+              input: '',
+              output: 'true',
+              points: 10,
+              isHidden: true, // 🔒 Hidden test case 1 - empty string
+            },
+            {
+              input: '(((',
+              output: 'false',
+              points: 10,
+              isHidden: true, // 🔒 Hidden test case 2 - only opening brackets
+            },
+            {
+              input: ')))',
+              output: 'false',
+              points: 10,
+              isHidden: true, // 🔒 Hidden test case 3 - only closing brackets
+            },
+            {
+              input: '(){}[]',
+              output: 'true',
+              points: 10,
+              isHidden: true, // 🔒 Hidden test case 4 - all types valid
+            },
+            {
+              input: '([{}])',
+              output: 'true',
+              points: 10,
+              isHidden: true, // 🔒 Hidden test case 5 - nested valid
+            },
+          ],
+        },
+      },
+    });
+
+    console.log('✅ Created problem:', validParenthesesProblem.title);
+    console.log('✅ Problem ID:', validParenthesesProblem.id);
+
+    // Create a Hello World problem for testing
+    const helloWorldProblem = await prisma.problem.create({
+      data: {
+        title: 'Hello World',
+        description: `Write a program that prints "Hello World" to the console.
+
+This is a simple introductory problem to test your setup.
+
+**Example:**
+Output: Hello World
+
+**Note:** Make sure there are no extra spaces or characters.`,
+        difficulty: 'EASY',
+        timeLimit: 1000,
+        memoryLimit: 64,
+        testCases: {
+          create: [
+            {
+              input: '',
+              output: 'Hello World',
+              points: 100,
+              isHidden: false,
+            },
+          ],
+        },
+      },
+    });
+
+    console.log('✅ Created problem:', helloWorldProblem.title);
+    console.log('✅ Problem ID:', helloWorldProblem.id);
+
+    // Verify test cases for all problems
+    const allProblems = await prisma.problem.findMany({
+      include: {
+        testCases: true
+      }
+    });
+
+    console.log('\n📊 SEED SUMMARY:');
+    console.log('================');
+    
+    for (const problem of allProblems) {
+      const visibleTests = problem.testCases.filter(tc => !tc.isHidden);
+      const hiddenTests = problem.testCases.filter(tc => tc.isHidden);
+      
+      console.log(`\n📝 ${problem.title}:`);
+      console.log(`   ├─ Difficulty: ${problem.difficulty}`);
+      console.log(`   ├─ Time Limit: ${problem.timeLimit}ms`);
+      console.log(`   ├─ Memory Limit: ${problem.memoryLimit}MB`);
+      console.log(`   ├─ Total Test Cases: ${problem.testCases.length}`);
+      console.log(`   ├─ 👁️  Visible: ${visibleTests.length}`);
+      console.log(`   └─ 🔒 Hidden: ${hiddenTests.length}`);
+    }
+
+    console.log('\n🎉 Manual seed completed successfully!');
+    console.log(`✅ Created ${allProblems.length} problems total`);
+
+  } catch (error) {
+    console.error('❌ Seed failed:', error);
+    process.exit(1);
+  } finally {
+    await prisma.$disconnect();
+  }
 }
 
-main()
-  .catch((e) => {
-    console.error('❌ Seed failed:');
-    console.error(e);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+// Handle command line arguments
+const args = process.argv.slice(2);
+const force = args.includes('--force');
+
+if (force) {
+  console.log('🔄 Force mode enabled - clearing existing data...');
+  prisma.testCase.deleteMany({})
+    .then(() => prisma.problem.deleteMany({}))
+    .then(() => seed())
+    .catch(console.error);
+} else {
+  seed();
+}

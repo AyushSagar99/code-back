@@ -1,117 +1,72 @@
-// src/server.ts
-import express, { Request, Response, NextFunction } from 'express';
+// server.ts - Fixed to load environment variables FIRST
+import dotenv from 'dotenv';
+// NOW import everything else (after environment variables are loaded)
+import express, { Request, Response, NextFunction, Express, json } from 'express';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import { PrismaClient } from '@prisma/client';
 
-// Import routes
-import problemRoutes from './routes/problems.js';
-import submissionRoutes from './routes/submissions.js';
+// Import routes (these will now see the environment variables)
+import problemRoutes from './routes/problem.routes.js';
+import submissionRoutes from './routes/submission.routes.js';
+import authRouter from './routes/auth.routes.js';
 
-const app = express();
-const prisma = new PrismaClient();
+
+dotenv.config({
+  path: "./.env",
+});
+
+
+
+const app: Express = express();
+export const prisma = new PrismaClient();
 const PORT = process.env.PORT || 3001;
 
-// Middleware
-app.use(cors());
-app.use(express.json({ limit: '1mb' }));
-app.use(express.urlencoded({ extended: true }));
+// Main server function
+async function main() {
+  try {
+    app.use(cors({
+      origin: "http://localhost:5173", // React dev server
+      credentials: true,
+      methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+      allowedHeaders: ["Content-Type", "Authorization"],
+    }));
+    app.use(json());
+    app.use(cookieParser());
 
-// Request logging middleware
-app.use((req: Request, res: Response, next: NextFunction) => {
-  const timestamp = new Date().toISOString();
-  console.log(`[${timestamp}] ${req.method} ${req.path}`);
-  next();
-});
 
-// API Routes
-app.use('/api/problems', problemRoutes);
-app.use('/api/submissions', submissionRoutes);
+    // API Routes
+    app.use('/api/v1/auth', authRouter);           
+    app.use('/api/problems', problemRoutes);
+    app.use('/api/submissions', submissionRoutes); 
 
-// Health check endpoint
-app.get('/health', (req: Request, res: Response) => {
-  res.json({
-    status: 'OK',
-    timestamp: new Date().toISOString(),
-    message: 'Code Judge Server is running!',
-    version: '1.0.0'
-  });
-});
+    
 
-// API info endpoint
-app.get('/api', (req: Request, res: Response) => {
-  res.json({
-    message: 'Code Judge API',
-    version: '1.0.0',
-    endpoints: {
-      problems: '/api/problems',
-      submissions: '/api/submissions',
-      health: '/health'
-    },
-    documentation: 'Check the routes for available endpoints'
-  });
-});
 
-// Global error handling middleware
-app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
-  console.error('🚨 Server Error:', err);
-  
-  // Prisma-specific errors
-  if ('code' in err && typeof err.code === 'string' && err.code.startsWith('P')) {
-    return res.status(400).json({
-      error: 'Database error',
-      message: 'Invalid request or data constraint violation'
+
+    
+
+    // Start server
+    app.listen(PORT, () => {
+      console.log(`🚀 Code Judge Server is running!`);
+     
+      console.log('🚀 ================================');
+      console.log(`📊 Health check: http://localhost:${PORT}/health`);
+      console.log('🚀 ================================');
     });
+
+  } catch (error) {
+    console.error('❌ Failed to start server:', error);
+    await prisma.$disconnect();
+    process.exit(1);
   }
-  
-  // Default error response
-  res.status(500).json({
-    error: 'Internal server error',
-    message: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong!'
-  });
-});
+}
 
-// 404 handler for unknown routes
-app.use((req: Request, res: Response) => {
-  res.status(404).json({
-    error: 'Route not found',
-    path: req.path,
-    method: req.method,
-    availableRoutes: [
-      'GET /health',
-      'GET /api',
-      'GET /api/problems',
-      'GET /api/problems/:id',
-      'POST /api/submissions',
-      'POST /api/submissions/sync',
-      'GET /api/submissions/:id'
-    ]
-  });
-});
 
-// Graceful shutdown
-process.on('SIGINT', async () => {
-  console.log('\n🛑 Shutting down gracefully...');
+
+
+main().catch(async (error) => {
+  console.error('❌ Application failed to start:', error);
   await prisma.$disconnect();
-  console.log('✅ Database disconnected');
-  process.exit(0);
-});
-
-process.on('SIGTERM', async () => {
-  console.log('\n🛑 SIGTERM received, shutting down gracefully...');
-  await prisma.$disconnect();
-  process.exit(0);
-});
-
-// Start server
-app.listen(PORT, () => {
-  console.log('🚀 ================================');
-  console.log(`🚀 Code Judge Server is running!`);
-  console.log(`🚀 Port: ${PORT}`);
-  console.log(`🚀 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log('🚀 ================================');
-  console.log(`📊 Health check: http://localhost:${PORT}/health`);
-  console.log(`📝 Problems API: http://localhost:${PORT}/api/problems`);
-  console.log(`💻 Submissions API: http://localhost:${PORT}/api/submissions`);
-  console.log(`🧪 Test Judge0: http://localhost:${PORT}/api/submissions/test-judge0`);
-  console.log('🚀 ================================');
+  process.exit(1);
 });
